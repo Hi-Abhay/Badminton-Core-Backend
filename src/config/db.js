@@ -14,9 +14,12 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 5000, 
     });
 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+      return `MongoDB Connected: ${conn.connection.host}`
+
   } catch (error) {
-    console.error(`Database Connection Error: ${error.message}`);
+    return `Database Connection Error: ${error.message}`
+    // console.error(`Database Connection Error: ${error.message}`);
+    
     // DO NOT use process.exit(1) in serverless environments like Vercel.
     // Throw the error instead so your API can catch it and return a 500 error.
     throw error;
