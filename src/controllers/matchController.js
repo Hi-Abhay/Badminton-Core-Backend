@@ -1614,3 +1614,254 @@ exports.getMutualConnectionsUpcomingMatches = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * Get Match Statistics for a Specific Team
+ * GET /matches/team-stats/:teamId
+ */
+exports.getTeamStats = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+
+    if (!teamId || !isValidObjectId(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Team ID format.",
+      });
+    }
+
+    const targetTeamId = new mongoose.Types.ObjectId(teamId);
+
+    // 1. Fetch the Team document to get the IDs of the two players
+    // Note: We use mongoose.model('Team') dynamically to avoid require cycle issues
+    const Team = mongoose.model("Team");
+    const team = await Team.findById(targetTeamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found.",
+      });
+    }
+
+    // Ensure we are strictly using ObjectIds (handling whether they are populated or not)
+    const p1 = new mongoose.Types.ObjectId(team.player1._id || team.player1);
+    const p2 = new mongoose.Types.ObjectId(team.player2._id || team.player2);
+
+    // 2. Match Filter: Find matches where p1 and p2 are together on sideA OR sideB (in either order)
+    const matchFilter = {
+      $or: [
+        {
+          $or: [
+            { "sideA.primaryUser": p1, "sideA.partnerUser": p2 },
+            { "sideA.primaryUser": p2, "sideA.partnerUser": p1 },
+          ],
+        },
+        {
+          $or: [
+            { "sideB.primaryUser": p1, "sideB.partnerUser": p2 },
+            { "sideB.primaryUser": p2, "sideB.partnerUser": p1 },
+          ],
+        },
+      ],
+    };
+
+    // 3. Run Aggregation
+    const statsAggregation = await Match.aggregate([
+      { $match: matchFilter },
+      {
+        $project: {
+          status: 1,
+          matchWinner: "$liveState.matchWinner",
+          // Check if the team is Side A
+          isSideA: {
+            $or: [
+              {
+                $and: [
+                  { $eq: ["$sideA.primaryUser", p1] },
+                  { $eq: ["$sideA.partnerUser", p2] },
+                ],
+              },
+              {
+                $and: [
+                  { $eq: ["$sideA.primaryUser", p2] },
+                  { $eq: ["$sideA.partnerUser", p1] },
+                ],
+              },
+            ],
+          },
+          // Check if the team is Side B
+          isSideB: {
+            $or: [
+              {
+                $and: [
+                  { $eq: ["$sideB.primaryUser", p1] },
+                  { $eq: ["$sideB.partnerUser", p2] },
+                ],
+              },
+              {
+                $and: [
+                  { $eq: ["$sideB.primaryUser", p2] },
+                  { $eq: ["$sideB.partnerUser", p1] },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalMatches: { $sum: 1 },
+          completedMatches: {
+            $sum: { $cond: [{ $eq: ["$status", "COMPLETED"] }, 1, 0] },
+          },
+          inProgressMatches: {
+            $sum: { $cond: [{ $eq: ["$status", "IN_PROGRESS"] }, 1, 0] },
+          },
+          pendingMatches: {
+            $sum: {
+              $cond: [
+                {
+                  $in: [
+                    "$status",
+                    ["INVITATION_PENDING", "ACCEPTED", "TOSS_READY"],
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          totalWon: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ["$status", "COMPLETED"] },
+                    {
+                      $or: [
+                        {
+                          $and: [
+                            { $eq: ["$isSideA", true] },
+                            { $eq: ["$matchWinner", "sideA"] },
+                          ],
+                        },
+                        {
+                          $and: [
+                            { $eq: ["$isSideB", true] },
+                            { $eq: ["$matchWinner", "sideB"] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const result = statsAggregation[0] || {
+      totalMatches: 0,
+      completedMatches: 0,
+      inProgressMatches: 0,
+      pendingMatches: 0,
+      totalWon: 0,
+    };
+
+    const completed = result.completedMatches || 0;
+    const won = result.totalWon || 0;
+    const lost = Math.max(0, completed - won);
+    const winRate = completed > 0 ? Math.round((won / completed) * 100) : 0;
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalMatches: result.totalMatches,
+        completedMatches: completed,
+        inProgressMatches: result.inProgressMatches,
+        pendingMatches: result.pendingMatches,
+        totalWon: won,
+        totalLost: lost,
+        winRate: `${winRate}%`,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to calculate team statistics.",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Delete / Dismiss a Match
+ * DELETE /matches/:id
+ */
+exports.deleteMatch = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid match ID format.",
+      });
+    }
+
+    const match = await Match.findById(id);
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        message: "Match not found.",
+      });
+    }
+
+    // Authorization: Only the creator can delete the match
+    if (match.createdBy.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized. Only the match creator can delete this match.",
+      });
+    }
+
+    // Optional: You could prevent deleting completed matches if you want to keep history
+    // if (match.status === "COMPLETED") {
+    //   return res.status(400).json({ success: false, message: "Cannot delete a completed match." });
+    // }
+
+    await Match.findByIdAndDelete(id);
+
+    // Tell clients via socket that the match is gone so it disappears from UI
+    emitMatchUpdate(match._id, {
+      type: "MATCH_DELETED",
+      matchId: match._id.toString(),
+      status: "DELETED",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Match deleted successfully.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete match.",
+      error: error.message,
+    });
+  }
+};

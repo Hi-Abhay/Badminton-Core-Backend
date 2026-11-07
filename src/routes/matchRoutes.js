@@ -15,7 +15,7 @@ const auth =
 // Runtime sanity checks
 if (typeof auth !== "function") {
   throw new TypeError(
-    `[matchRoutes] Expected authMiddleware to be a function, but received ${typeof importedAuth}. Check exports in src/middleware/authMiddleware.js`
+    `[matchRoutes] Expected authMiddleware to be a function, but received ${typeof importedAuth}. Check exports in src/middleware/authMiddleware.js`,
   );
 }
 
@@ -29,14 +29,16 @@ const requiredHandlers = [
   "undoPoint",
   "getLiveScore",
   "getUserStats",
+  "getTeamStats", // <--- ADDED THIS HERE
   "getMutualConnectionsLiveMatches",
   "getMutualConnectionsUpcomingMatches",
+  "deleteMatch", // <--- ADD THIS HERE
 ];
 
 requiredHandlers.forEach((handler) => {
   if (typeof matchController[handler] !== "function") {
     throw new TypeError(
-      `[matchRoutes] matchController.${handler} is not a function. Check exports in src/controllers/matchController.js`
+      `[matchRoutes] matchController.${handler} is not a function. Check exports in src/controllers/matchController.js`,
     );
   }
 });
@@ -489,7 +491,11 @@ router.get("/my-stats", auth, matchController.getUserStats);
  *       500:
  *         description: Server error.
  */
-router.get("/mutual-live", auth, matchController.getMutualConnectionsLiveMatches);
+router.get(
+  "/mutual-live",
+  auth,
+  matchController.getMutualConnectionsLiveMatches,
+);
 
 /**
  * @swagger
@@ -523,7 +529,11 @@ router.get("/mutual-live", auth, matchController.getMutualConnectionsLiveMatches
  *       500:
  *         description: Server error.
  */
-router.get("/mutual-upcoming", auth, matchController.getMutualConnectionsUpcomingMatches);
+router.get(
+  "/mutual-upcoming",
+  auth,
+  matchController.getMutualConnectionsUpcomingMatches,
+);
 
 // ==========================================
 // 2. PARAMETERIZED USER SPECIFIC ROUTES
@@ -635,6 +645,59 @@ router.get("/user/:userId", auth, matchController.getUserMatches);
  *         description: Player profile not found.
  */
 router.get("/stats/:userId", auth, matchController.getUserStats);
+
+/**
+ * @swagger
+ * /matches/team-stats/{teamId}:
+ *   get:
+ *     summary: Get public match statistics for a specific team by Team ID
+ *     description: Returns overall matches, wins, losses, and win rate for any target team.
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: teamId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of target team
+ *         example: "6ad90b433a2f23cd67c33abc"
+ *     responses:
+ *       200:
+ *         description: Team statistics retrieved successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 stats:
+ *                   type: object
+ *                   properties:
+ *                     totalMatches:
+ *                       type: integer
+ *                       example: 10
+ *                     completedMatches:
+ *                       type: integer
+ *                       example: 8
+ *                     totalWon:
+ *                       type: integer
+ *                       example: 5
+ *                     totalLost:
+ *                       type: integer
+ *                       example: 3
+ *                     winRate:
+ *                       type: string
+ *                       example: "63%"
+ *       400:
+ *         description: Invalid Team ID format.
+ *       500:
+ *         description: Internal server error.
+ */
+router.get("/team-stats/:teamId", auth, matchController.getTeamStats); // <--- ADDED THIS HERE
 
 // ==========================================
 // 3. MATCH-SPECIFIC SUB-RESOURCE ROUTES
@@ -872,5 +935,46 @@ router.post("/:id/live/undo", auth, matchController.undoPoint);
  *         description: Match not found.
  */
 router.get("/:id", auth, matchController.getMatchById);
+
+/**
+ * @swagger
+ * /matches/{id}:
+ *   delete:
+ *     summary: Delete or dismiss a match
+ *     description: Permanently deletes a match. Only the user who created the match (createdBy) is authorized to delete it.
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Match MongoDB ObjectId
+ *     responses:
+ *       200:
+ *         description: Match deleted successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Match deleted successfully."
+ *       400:
+ *         description: Invalid match ID format.
+ *       403:
+ *         description: Unauthorized. Only the match creator can delete.
+ *       404:
+ *         description: Match not found.
+ *       500:
+ *         description: Server error.
+ */
+router.delete("/:id", auth, matchController.deleteMatch);
 
 module.exports = router;
