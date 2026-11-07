@@ -20,7 +20,7 @@ app.use("/teams", teamRoutes);
 app.use('/matches', matchRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/chats", chatRoutes);
-app.get("/health", (req, res) => {
+app.get("/", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
