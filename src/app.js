@@ -2,13 +2,19 @@ const express = require("express");
 const cors = require("cors");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swagger");
+const connectDB = require("./config/db"); // Add this import
+
 const userRoutes = require("./routes/userRoutes");
 const connectionRoutes = require("./routes/connectionRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const matchRoutes = require('./routes/matchRoutes');
 const notificationRoutes = require("./routes/notificationRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+
 const app = express();
+
+// Initialize Database Connection for Vercel
+connectDB(); 
 
 app.use(cors());
 app.use(express.json());
